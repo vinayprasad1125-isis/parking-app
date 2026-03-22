@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Parking Map App</title>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        #locateBtn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 5;
+            background: white;
+            border: none;
+            padding: 12px 16px;
+            font-size: 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+     
+        #bookingPanel {
+            position: fixed;
+            right: -320px; /* fully hidden */
+            top: 0;
+            width: 300px;
+            height: 100%;
+            background: white;
+            box-shadow: -2px 0 6px rgba(0,0,0,0.3);
+            padding: 20px;
+            transition: right 0.3s ease;
+            z-index: 10;
+        }
+
+        #bookingPanel.active {
+            right: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<button onclick="locateUser()" id="locateBtn">📍 Locate Me</button>
+
+<div id="bookingPanel">
+    <!-- ✅ CLOSE BUTTON -->
+    <button onclick="closeBooking()" style="float:right;">❌</button>
+
+    <h2>Book Parking</h2>
+    
+    <p id="spotName"></p>
+
+    <div>
+        <button onclick="changeHours(-1)">➖</button>
+        <span id="hours">1</span> hour(s)
+        <button onclick="changeHours(1)">➕</button>
+    </div>
+
+    <p>Total Price: ₹<span id="totalPrice">0</span></p>
+
+    <button onclick="proceedBooking()">Proceed</button>
+</div>
+
+<script>
+let selectedSpot = null;
+let selectedPrice = 0;
+let hours = 1;
+let map;
+let userMarker;
+
+function openBooking(name, price) {
+    selectedSpot = name;
+    selectedPrice = price;
+    hours = 1;
+
+    document.getElementById("spotName").innerText = name;
+    document.getElementById("hours").innerText = hours;
+    document.getElementById("totalPrice").innerText = price;
+
+    document.getElementById("bookingPanel").classList.add("active");
+}
+
+
+function closeBooking() {
+    document.getElementById("bookingPanel").classList.remove("active");
+}
+
+function changeHours(change) {
+    hours += change;
+    if (hours < 1) hours = 1;
+
+    document.getElementById("hours").innerText = hours;
+    document.getElementById("totalPrice").innerText = hours * selectedPrice;
+}
+
+function proceedBooking() {
+    alert(`Booked ${selectedSpot} for ${hours} hour(s)\nTotal: ₹${hours * selectedPrice}`);
+}
+
+// 📍 Initialize map
+function initMap() {
+    const defaultCenter = { lat: 13.0827, lng: 80.2707 };
+
+    map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 13,
+        center: defaultCenter,
+    });
+
+    locateUser(true);
+}
+
+// 📍 Generate random locations
+function generateNearbySpots(userLocation, count) {
+    const spots = [];
+    const radiusInKm = 10;
+
+    for (let i = 0; i < count; i++) {
+        const r = radiusInKm * Math.sqrt(Math.random());
+        const theta = Math.random() * 2 * Math.PI;
+
+        const latOffset = r * Math.cos(theta) / 111;
+        const lngOffset = r * Math.sin(theta) / (111 * Math.cos(userLocation.lat * Math.PI / 180));
+
+        const status = Math.random() > 0.5 ? "available" : "occupied";
+        const price = Math.floor(Math.random() * (700 - 200 + 1)) + 200;
+
+        spots.push({
+            lat: userLocation.lat + latOffset,
+            lng: userLocation.lng + lngOffset,
+            name: "Street Parking " + (i + 1),
+            status: status,
+            price: price
+        });
+    }
+
+    return spots;
+}
+
+// 📍 Locate user
+function locateUser(autoLoad = false) {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+            const userLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+
+            if (userMarker) userMarker.setMap(null);
+
+            userMarker = new google.maps.Marker({
+                position: userLocation,
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 8,
+                    fillColor: "#4285F4",
+                    fillOpacity: 1,
+                    strokeColor: "white",
+                    strokeWeight: 2
+                }
+            });
+
+            new google.maps.Circle({
+                strokeColor: "#4285F4",
+                strokeOpacity: 0.3,
+                strokeWeight: 1,
+                fillColor: "#4285F4",
+                fillOpacity: 0.15,
+                map: map,
+                center: userLocation,
+                radius: position.coords.accuracy
+            });
+
+            map.setCenter(userLocation);
+            map.setZoom(14);
+
+            const parkingSpots = generateNearbySpots(userLocation, 15);
+
+            parkingSpots.forEach(spot => {
+                const marker = new google.maps.Marker({
+                    position: { lat: spot.lat, lng: spot.lng },
+                    map: map,
+                    title: spot.name,
+                    icon: spot.status === "available"
+                        ? "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
+                        : "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                });
+
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `
+                        <h3>${spot.name}</h3>
+                        <p>Status: ${spot.status}</p>
+                        <p>Price: ₹${spot.price}/hr</p>
+                        ${
+                            spot.status === "available"
+                            ? '<button id="bookBtn">Book Now</button>'
+                            : `<p style="color:red;">Not Available</p>`
+                        }
+                    `
+                });
+
+                marker.addListener("click", () => {
+                    infoWindow.open(map, marker);
+
+                    google.maps.event.addListenerOnce(infoWindow, "domready", () => {
+                        const btn = document.getElementById("bookBtn");
+
+                        if (btn) {
+                            btn.addEventListener("click", () => {
+                                openBooking(spot.name, spot.price);
+                            });
+                        }
+                    });
+                });
+            });
+
+        }, () => {
+            if (!autoLoad) alert("Location access denied ❌");
+        });
+    } else {
+        alert("Geolocation not supported ❌");
+    }
+}
+</script>
+
+
+<script async defer
+src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAxKIRM-N-u-5fdCLwbb_duc0auPCJUjhU&callback=initMap">
+</script>
+
+</body>
+</html>
